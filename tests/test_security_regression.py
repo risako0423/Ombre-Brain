@@ -487,3 +487,22 @@ async def test_management_body_limit_preserves_large_upload_routes(path):
 
     assert calls == [path]
     assert sent[0]["status"] == 204
+
+
+@pytest.mark.parametrize("decode_method", ["decode", "decode_complete"])
+def test_pyjwt_reused_options_preserve_expiry_verification(decode_method):
+    """CVE-2026-103001：无签名读取不能污染随后复用的验证选项。"""
+    import jwt
+
+    secret = "ombre-synthetic-jwt-regression-secret-2026"
+    token = jwt.encode({"exp": 1, "sub": "synthetic-test"}, secret, algorithm="HS256")
+    options = {"verify_signature": False}
+    decode = getattr(jwt, decode_method)
+
+    decode(token, options=options)
+    assert options == {"verify_signature": False}
+
+    options["verify_signature"] = True
+    with pytest.raises(jwt.ExpiredSignatureError):
+        decode(token, secret, algorithms=["HS256"], options=options)
+    assert options == {"verify_signature": True}
