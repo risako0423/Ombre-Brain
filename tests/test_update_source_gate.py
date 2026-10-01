@@ -98,8 +98,12 @@ def test_ci_lock_verification_freezes_package_index_snapshot():
 
     assert step.count("uv pip compile ") == 2
     assert "--upgrade" not in step
-    assert "--exclude-newer" not in step, (
-        "cutoff 必须通过环境变量传入，避免 uv 把参数写进 lock 头部造成纯文本漂移"
+    assert re.search(r"--exclude-newer(?:[ =]|$)", step) is None, (
+        "全局 cutoff 必须通过环境变量传入，避免所有依赖跟随单包安全修复升级"
+    )
+    package_cutoffs = re.findall(r"--exclude-newer-package ([^\s]+)", step)
+    assert package_cutoffs == ["pyjwt=2026-09-29T00:00:00Z"] * 2, (
+        "两份锁必须仅对 PyJWT 使用同一个明确的安全修复快照"
     )
     reset_command = "rm -f requirements.lock.txt requirements-dev.lock.txt"
     assert reset_command in step, "lock 校验必须从空输出重建，不能依赖已有 pin 偏好"
@@ -145,13 +149,18 @@ def test_legacy_archive_compatibility_requires_284_release_lock():
     Windows 都没有。缺了它 `utils.get_tzinfo()` 会静默兜底成固定 +08:00——
     配 America/New_York 的用户拿到东八区的解锁时间，且没有任何提示。
     详见 3.6.1 的 CHANGELOG。
+
+    2026-10-01：仅将 PyJWT 从 2.13.0 升至 2.15.1，并增加安全修复下限。
+    两份锁通过单包快照例外重新生成，其他既有包版本不变。生产部署必须重建
+    镜像；不能仅热更新 src/ 后声称依赖已修复。旧版热更新器仍存在上文说明
+    的依赖迁移边界，不恢复宽松 pip 安装，也不放开更新来源或安全检查。
     """
     repo_root = Path(meta.__file__).resolve().parents[2]
     lock_bytes = (repo_root / "requirements.lock.txt").read_bytes()
     normalized = lock_bytes.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
     assert hashlib.sha256(normalized).hexdigest() == (
-        "ae0255bd41e5ceb45694244017a9b0b2dc1e4c445ab027cec1f7183ad969700a"
+        "e98de12e5e23169806a25e9a740893347f26ddcf14d54c06d545f73e910b000e"
     ), (
         "requirements.lock.txt 已变化：确认这次变化是否会影响还没升级过的旧版"
         "热更新器（尤其 v2.8.4 之前、缺少 lock 感知回退逻辑的实例），评估后再把"
